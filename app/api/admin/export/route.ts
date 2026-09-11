@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { data: caller } = await supabase.from("users").select("role").eq("id", user.id).single();
-  if (caller?.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  if ((caller as any)?.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
 
   const which = req.nextUrl.searchParams.get("table") || "products";
 
