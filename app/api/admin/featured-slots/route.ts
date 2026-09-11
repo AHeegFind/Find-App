@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   const deadline = new Date(Date.now() + (paymentWindowHours ?? 48) * 60 * 60 * 1000);
 
   const { data: slot, error: insertError } = await supabase
-    .from("featured_slots")
+    .from("featured_slots") as any)
     .insert({
       product_id: productId,
       placement_type: type,
