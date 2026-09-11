@@ -22,7 +22,7 @@ export default function AdminDashboard() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { setAuthorised(false); return; }
       const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single();
-      if (profile?.role !== "admin") { setAuthorised(false); return; }
+      if ((profile as any)?.role !== "admin") { setAuthorised(false); return; }
       setAuthorised(true);
       loadAll(supabase);
     });
