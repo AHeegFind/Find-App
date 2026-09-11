@@ -1,20 +1,29 @@
 // POST /api/admin/products/[id]/review
-// Admin approves or rejects a single product. Approving makes it publicly
-// searchable (moderation_status='approved' is what public RLS policies and
-// the search route gate on). Also sets verification_status to
-// find_verified if the owning business is already verified.
+// Admin approves or rejects a single product.
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const supabase = createClient();
+type AdminCheckResult =
+  | { user: { id: string }; error?: undefined }
+  | { user?: undefined; error: NextResponse };
+
+async function requireAdmin(supabase: ReturnType<typeof createClient>): Promise<AdminCheckResult> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  if (!user) return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
 
   const { data: caller } = await supabase.from("users").select("role").eq("id", user.id).single();
-  if (caller?.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  if (caller?.role !== "admin") return { error: NextResponse.json({ error: "Admin only" }, { status: 403 }) };
+
+  return { user };
+}
+
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const supabase = createClient();
+  const check = await requireAdmin(supabase);
+  if (check.error) return check.error;
+  const user = check.user!;
 
   const body = await req.json().catch(() => null);
   const { decision } = body || {};

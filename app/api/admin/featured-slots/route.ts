@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   if (error) return error;
 
   const { data, error: fetchError } = await supabase
-    .from("featured_slots")
+    .from("ffeatured_slots")
     .select("*, products(id, name, price, currency, businesses(name))")
     .order("created_at", { ascending: false });
 

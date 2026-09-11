@@ -4,15 +4,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const supabase = createClient();
+// Explicit return type here is what fixes the "Property 'role' does not
+// exist on type 'never'" build error: without it, TypeScript can't prove
+// a consistent shape across the function's two return paths and collapses
+// inference down to `never`. Naming the type is a one-line fix that stops
+// the build from misreading the function's real, always-safe shape.
+type AdminCheckResult =
+  | { user: { id: string }; error?: undefined }
+  | { user?: undefined; error: NextResponse };
+
+async function requireAdmin(supabase: ReturnType<typeof createClient>): Promise<AdminCheckResult> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  if (!user) return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
 
   const { data: caller } = await supabase.from("users").select("role").eq("id", user.id).single();
-  if (caller?.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
+  if (caller?.role !== "admin") return { error: NextResponse.json({ error: "Admin only" }, { status: 403 }) };
+
+  return { user };
+}
+
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const supabase = createClient();
+  const check = await requireAdmin(supabase);
+  if (check.error) return check.error;
+  const user = check.user!;
 
   const body = await req.json().catch(() => null);
   const { decision, rejectionReason } = body || {};
@@ -48,8 +65,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   if (bizError) console.error("[admin/sellers/review] business update error:", bizError);
 
-  // If approved, upgrade this business's already-approved products to
-  // find_verified so the badge reflects the newly verified status.
   if (decision === "approved") {
     await supabase
       .from("products")
