@@ -9,23 +9,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-async function requireAdmin(supabase: ReturnType<typeof createClient>) {
+type AdminCheckResult =
+  | { user: { id: string }; error?: undefined }
+  | { user?: undefined; error: NextResponse };
+
+async function requireAdmin(supabase: ReturnType<typeof createClient>): Promise<AdminCheckResult> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
+
   const { data: caller } = await supabase.from("users").select("role").eq("id", user.id).single();
-  if ((caller as any)?.role !== "admin") return { error: NextResponse.json({ error: "Admin only" }, { status: 403 }) };
+  if (caller?.role !== "admin") return { error: NextResponse.json({ error: "Admin only" }, { status: 403 }) };
+
   return { user };
 }
 
 export async function GET(req: NextRequest) {
   const supabase = createClient();
-  const { error } = await requireAdmin(supabase);
-  if (error) return error;
+  const check = await requireAdmin(supabase);
+  if (check.error) return check.error;
 
   const { data, error: fetchError } = await supabase
-    .from("ffeatured_slots")
+    .from("featured_slots")
     .select("*, products(id, name, price, currency, businesses(name))")
     .order("created_at", { ascending: false });
 
@@ -35,8 +41,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const supabase = createClient();
-  const { user, error } = await requireAdmin(supabase);
-  if (error) return error;
+  const check = await requireAdmin(supabase);
+  if (check.error) return check.error;
+  const user = check.user!;
 
   const body = await req.json().catch(() => null);
   const { productId, placementType, discoverSection, keywords, positionTier, price, durationDays, paymentWindowHours } = body || {};
@@ -52,10 +59,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "At least one keyword is required for search placements" }, { status: 400 });
   }
 
-  const deadline = new Date(Date.now() + (paymentWindowHours ?? 48) * 60 * 60 * 1000);
+  const deadlineHours = paymentWindowHours ?? 48;
+  const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
 
   const { data: slot, error: insertError } = await supabase
-    .from("featured_slots") as any)
+    .from("featured_slots")
     .insert({
       product_id: productId,
       placement_type: type,
@@ -66,7 +74,7 @@ export async function POST(req: NextRequest) {
       duration_days: durationDays ?? 7,
       payment_deadline: deadline.toISOString(),
       status: "offered",
-      created_by: user!.id,
+      created_by: user.id,
     })
     .select()
     .single();

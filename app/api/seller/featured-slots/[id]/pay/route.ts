@@ -5,16 +5,12 @@
 //
 // PAYMENT INTEGRATION NOTE: this route does not itself process a real
 // payment. Real M-Pesa collection requires Safaricom's Daraja API (STK
-// Push), which needs its own developer account, app registration, and a
-// separate integration outside this build's scope. Two ways to wire it in
-// when you're ready:
-//   (a) Call the Daraja STK Push API here, wait for its callback webhook
-//       to confirm success, THEN run the code below.
-//   (b) Manual for now: seller pays you directly (M-Pesa till/paybill),
-//       and an admin clicks "confirm payment" in the dashboard, which
-//       calls this same route server-side.
-// Both paths converge on the same DB update below, so building the real
-// Daraja integration later doesn't require touching the scheduling logic.
+// Push), which needs its own developer account and a separate
+// integration outside this build's scope. For now: seller pays you
+// directly (till/paybill), an admin confirms it happened, and this same
+// route is called (manually, or via a future "confirm payment" button)
+// to activate the slot. Building real Daraja collection later means
+// swapping what triggers this call, not rewriting the logic below.
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -33,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   if (fetchError || !slot) return NextResponse.json({ error: "Featured slot offer not found" }, { status: 404 });
 
-  const ownerId = (slot.products as any)?.businesses?.owner_id;
+  const ownerId = (slot.products as { businesses?: { owner_id?: string } } | null)?.businesses?.owner_id;
   if (ownerId !== user.id) return NextResponse.json({ error: "Not authorised for this offer" }, { status: 403 });
 
   if (slot.status !== "offered") {
@@ -44,9 +40,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Payment window has expired" }, { status: 409 });
   }
 
-  // Find the next available start date for this discover_section: either
-  // now, or right after the current live/paid slot in that section ends,
-  // so slots queue back-to-back rather than overlapping.
   const { data: latestInSection } = await supabase
     .from("featured_slots")
     .select("end_date")
@@ -56,9 +49,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .limit(1)
     .maybeSingle();
 
-  const startDate = latestInSection?.end_date && new Date(latestInSection.end_date) > new Date()
-    ? new Date(latestInSection.end_date)
-    : new Date();
+  const now = new Date();
+  const startDate =
+    latestInSection?.end_date && new Date(latestInSection.end_date) > now
+      ? new Date(latestInSection.end_date)
+      : now;
   const endDate = new Date(startDate.getTime() + slot.duration_days * 24 * 60 * 60 * 1000);
 
   const { data: updated, error: updateError } = await supabase
